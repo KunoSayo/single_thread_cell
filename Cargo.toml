@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+
+[package]
+name = "single_thread_cell"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+
+[dependencies]
