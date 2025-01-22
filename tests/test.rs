@@ -12,23 +12,22 @@ fn test_single_thread_cell() {
 
 #[test]
 fn test_single_thread_ref_cell() {
-    let cell = SingleThreadRefCell::new(0);
-    assert_eq!(*cell.borrow(), 0);
-    *cell.borrow_mut() += 1;
-    assert_eq!(*cell.borrow(), 1);
+    let ref_cell = SingleThreadRefCell::new(0);
+    assert_eq!(*ref_cell.borrow(), 0);
+    *ref_cell.borrow_mut() += 1;
+    assert_eq!(*ref_cell.borrow(), 1);
 
-    *cell.borrow_mut() += 1;
-    assert_eq!(*cell.borrow(), 2);
-    *cell.borrow_mut() += 1;
-    assert_eq!(*cell.borrow(), 3);
-    assert_eq!(*cell.borrow(), 3);
+    *ref_cell.borrow_mut() += 1;
+    assert_eq!(*ref_cell.borrow(), 2);
+    *ref_cell.borrow_mut() += 1;
+    assert_eq!(*ref_cell.borrow(), 3);
+    assert_eq!(*ref_cell.borrow(), 3);
 
     {
-        let b1 = cell.borrow();
-        let b2 = cell.borrow();
+        let b1 = ref_cell.borrow();
+        let b2 = ref_cell.borrow();
         assert_eq!(*b1, 3);
         assert_eq!(*b2, 3);
-
     }
 }
 
@@ -89,7 +88,7 @@ fn test_different_thread_borrow_mut() {
 
     let cloned = cell.clone();
     let result = std::thread::spawn(move || {
-       *cloned.borrow_mut() = 2;
+        *cloned.borrow_mut() = 2;
     }).join();
     assert!(result.is_err());
 
@@ -104,7 +103,6 @@ fn test_different_thread_borrow_mut() {
     }).join();
     assert!(result.is_err());
 }
-
 
 
 // How to test abort?
