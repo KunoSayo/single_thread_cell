@@ -1,5 +1,6 @@
 use std::cell::{Cell, UnsafeCell};
 use std::marker::PhantomData;
+use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::thread::ThreadId;
@@ -32,7 +33,7 @@ fn panic_already_mutably_borrowed() -> ! {
 pub trait SingleThreadType {
     fn get_owner_thread_id(&self) -> ThreadId;
 
-    /// Check the current thread or panic(abort).
+    /// Check the current thread and panic if not same.
     #[inline]
     fn check_thread_panic(&self) {
         let current_id = std::thread::current().id();
@@ -40,17 +41,24 @@ pub trait SingleThreadType {
             panic!("Access single thread cell with different thread id {:?}", current_id);
         }
     }
+
+    #[inline]
+    fn check_same_thread(&self) -> bool {
+        let current_id = std::thread::current().id();
+        current_id == self.get_owner_thread_id()
+    }
 }
 
 /// A mutable memory location. Can only be accessed by the owner thread.
 ///
-/// If you access the cell from a different thread, the process will be aborted.
+/// If you access the cell from a different thread, the thread will be panicked.
 pub struct SingleThreadCell<T> {
     value: UnsafeCell<T>,
     owner_thread: ThreadId,
 }
 
 impl<T> SingleThreadType for SingleThreadCell<T> {
+    /// Get the owner thread that owns this type.
     fn get_owner_thread_id(&self) -> ThreadId {
         self.owner_thread
     }
@@ -58,6 +66,9 @@ impl<T> SingleThreadType for SingleThreadCell<T> {
 
 
 impl<T> SingleThreadCell<T> {
+    /// Creates a new Cell containing the given value.
+    ///
+    /// The owner thread will be the same as the caller thread.
     pub fn new(val: T) -> Self {
         Self {
             value: UnsafeCell::new(val),
@@ -75,31 +86,18 @@ impl<T> SingleThreadCell<T> {
         // SAFETY: We checked the thread.
         unsafe { *self.value.get() = value; }
     }
-}
 
-impl<T: Copy> SingleThreadCell<T> {
-    /// Returns a copy of the contained value.
+    /// Replace the contained value, and return the old contained value.
+    ///
+    /// # Panics
+    /// This function will panic if access from different thread
     #[inline]
-    pub fn get(&self) -> T {
+    pub fn replace(&self, value: T) -> T {
         self.check_thread_panic();
         // SAFETY: We checked the thread.
-        unsafe { *self.value.get() }
+        mem::replace(unsafe { &mut *self.value.get() }, value)
     }
 }
-
-impl<T> Drop for SingleThreadCell<T> {
-    fn drop(&mut self) {
-        if cfg!(debug_assertions) || std::mem::needs_drop::<T>() {
-            self.check_thread_panic();
-        }
-    }
-}
-
-unsafe impl<T> Send for SingleThreadCell<T> {}
-unsafe impl<T> Sync for SingleThreadCell<T> {}
-unsafe impl<T> Send for SingleThreadRefCell<T> {}
-unsafe impl<T> Sync for SingleThreadRefCell<T> {}
-
 
 pub struct SingleThreadRefCell<T> {
     borrow: UnsafeCell<BorrowFlag>,
@@ -164,6 +162,39 @@ impl<T> SingleThreadType for SingleThreadRefCell<T> {
         self.owner_thread
     }
 }
+
+impl<T: Copy> SingleThreadCell<T> {
+    /// Returns a copy of the contained value.
+    #[inline]
+    pub fn get(&self) -> T {
+        self.check_thread_panic();
+        // SAFETY: We checked the thread.
+        unsafe { *self.value.get() }
+    }
+}
+
+macro_rules! check_drop {
+    ($this: expr) => {
+        if cfg!(debug_assertions) || mem::needs_drop::<T>() {
+            $this.check_thread_panic();
+        }
+    };
+}
+
+impl<T> Drop for SingleThreadCell<T> {
+    fn drop(&mut self) {
+        check_drop!(self);
+    }
+}
+
+impl<T> Drop for SingleThreadRefCell<T> {
+    fn drop(&mut self) {
+        check_drop!(self);
+    }
+}
+
+unsafe impl<T> Sync for SingleThreadCell<T> {}
+unsafe impl<T> Sync for SingleThreadRefCell<T> {}
 
 struct BorrowRef<'a> {
     borrow: &'a UnsafeCell<BorrowFlag>,

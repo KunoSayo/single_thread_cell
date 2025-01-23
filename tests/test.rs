@@ -103,6 +103,3 @@ fn test_different_thread_borrow_mut() {
     }).join();
     assert!(result.is_err());
 }
-
-
-// How to test abort?
