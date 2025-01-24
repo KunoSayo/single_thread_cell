@@ -1,4 +1,14 @@
-use std::cell::{Cell, UnsafeCell};
+//! This is a helper library to mark the cell as only being accessed by the owner thread.
+//!
+//! If you access the cell from a different thread, the thread will be panicked.
+//!
+//! The only exception is drop. The cell does not implement [`Send`] if `T` is not [`Send`].
+//! So that the cell cannot be sent to another thread to drop.
+//! It is obvious that if `T` is [`Send`], it is safe to drop in the other thread.
+pub mod types;
+pub use types::*;
+
+use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -30,24 +40,6 @@ fn panic_already_mutably_borrowed() -> ! {
     panic!("already mutably borrowed")
 }
 
-pub trait SingleThreadType {
-    fn get_owner_thread_id(&self) -> ThreadId;
-
-    /// Check the current thread and panic if not same.
-    #[inline]
-    fn check_thread_panic(&self) {
-        let current_id = std::thread::current().id();
-        if current_id != self.get_owner_thread_id() {
-            panic!("Access single thread cell with different thread id {:?}", current_id);
-        }
-    }
-
-    #[inline]
-    fn check_same_thread(&self) -> bool {
-        let current_id = std::thread::current().id();
-        current_id == self.get_owner_thread_id()
-    }
-}
 
 /// A mutable memory location. Can only be accessed by the owner thread.
 ///
@@ -173,26 +165,6 @@ impl<T: Copy> SingleThreadCell<T> {
     }
 }
 
-macro_rules! check_drop {
-    ($this: expr) => {
-        if cfg!(debug_assertions) || mem::needs_drop::<T>() {
-            $this.check_thread_panic();
-        }
-    };
-}
-
-impl<T> Drop for SingleThreadCell<T> {
-    fn drop(&mut self) {
-        check_drop!(self);
-    }
-}
-
-impl<T> Drop for SingleThreadRefCell<T> {
-    fn drop(&mut self) {
-        check_drop!(self);
-    }
-}
-
 unsafe impl<T> Sync for SingleThreadCell<T> {}
 unsafe impl<T> Sync for SingleThreadRefCell<T> {}
 
@@ -218,7 +190,7 @@ impl<'b> BorrowRef<'b> {
 struct BorrowRefMut<'b> {
     borrow: &'b UnsafeCell<BorrowFlag>,
     // Mark this is not send or sync
-    _marker: PhantomData<Cell<()>>,
+    marker: PhantomData<std::rc::Rc<()>>,
 }
 
 impl<'b> BorrowRefMut<'b> {
@@ -232,7 +204,7 @@ impl<'b> BorrowRefMut<'b> {
         match *borrow.get() {
             UNUSED => {
                 *borrow.get() = UNUSED - 1;
-                Some(BorrowRefMut { borrow: borrow, _marker: Default::default() })
+                Some(BorrowRefMut { borrow: borrow, marker: Default::default() })
             }
             _ => None,
         }
@@ -243,14 +215,13 @@ pub struct SingleThreadRef<'a, T: 'a> {
     value: NonNull<T>,
     _borrow: BorrowRef<'a>,
     // Mark this is not send or sync
-    marker: PhantomData<Cell<()>>,
+    marker: PhantomData<std::rc::Rc<()>>,
 }
 pub struct SingleThreadRefMut<'b, T: ?Sized + 'b> {
     value: NonNull<T>,
     _borrow: BorrowRefMut<'b>,
     marker: PhantomData<&'b mut T>,
 }
-
 
 impl Drop for BorrowRef<'_> {
     #[inline]

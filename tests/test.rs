@@ -1,5 +1,4 @@
 #![cfg(test)]
-
 use single_thread_cell::{SingleThreadCell, SingleThreadRefCell};
 
 #[test]
